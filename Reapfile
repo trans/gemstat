@@ -1,0 +1,48 @@
+require 'yaml'
+require 'open-uri'
+require 'pp'
+
+PER = 5
+
+desc "get list of gems from Rubygem.org"
+task :gems do
+  `gem list --remote > gemlist.txt`
+end
+
+desc "take gemlist.txt and tally all the dependencies"
+task :stats do
+  gems = []
+  deps = Hash.new{ |h,k| h[k]=0 }
+
+  File.readlines('gemlist.txt').each do |line|
+    i = line.index('(')
+    line = line.strip
+    name = line[0...i].strip
+    vers = line[i+1..-1].chomp(')')
+    next if name !~ /^\w/  # make sure its a real fucking gem
+    gems << [name, vers]
+  end
+
+  gems.each_slice(PER) do |slice|
+    names = slice.map{ |(name, vers)| name }
+    response = open("https://rubygems.org/api/v1/dependencies?gems=#{names.join(',')}")
+    data = Marshal.load(response)
+    data.each do |e|
+      e[:dependencies].each do |(n, v)|
+        deps[n] += 1
+      end
+    end
+  end
+
+  File.open('all.yml', 'w'){ |f| f << deps.to_yaml }
+end
+
+desc "take all.yml and sort it into stats.csv"
+task :sort do
+  data = YAML.load_file('all.yml')
+  data = data.map{ |name, count| [name, count] }
+  data = data.sort{ |a,b| b[1] <=> a[1] }
+  text = data.map{ |(name, count)| "#{name},#{count}" }.join("\n")
+  File.open('stats.csv', 'w'){ |f| f << text }
+end
+
